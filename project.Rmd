@@ -1,0 +1,291 @@
+---
+title: "Final Report-Expected Data and Player's Value"
+author: "Yuehan Duan"
+date: "2019-5-5"
+output:
+  pdf_document: 
+      latex_engine: xelatex
+---
+There¡¯re dozens of leagues in the soccer world, there¡¯s no doubt that European football(soccer) is much stronger than other continents. And among European football leagues, England Premier Leagues (EPL) is the most-watched football league in the world, broadcast in 212 territories to 643 million homes and a potential TV audience of 4.7 billion people. What¡¯s more, EPL is also famous for big clubs like Manchester United, Liverpool, Arsenal, Chelsea, Manchester City, Tottenham. No other league has as many big clubs as the English Premier League does. They are among the world¡¯s very elite and awash with some of the most exciting talents.
+
+```{R,echo=FALSE,message = FALSE}
+options(warn=-1)
+library(rvest)
+library(httr)
+library(jsonlite)
+library(curl)
+library(tidyverse)
+library(ggplot2)
+library(stringr)
+library(stringi)
+library(qdapRegex)
+```
+
+Since I want to find out relationship between player¡¯s transfer value and their performance, I will focus on the EPL players and more specifically, Top 100 players in EPL ranked with their transfer values.
+
+First, we must get the data we want. Let¡¯s start with the transfer markets website (https://www.transfermarkt.co.uk/) which is the most authoritative website in the field of soccer transfer.
+
+The data of players were stored in 4 pages, I need to write a loop for them and find the nodes where the data I needed by viewing its CSS source through chrome and clear the data.
+
+Then, get name, position, age and transfer value for each player, data samples of top10 player is shown below:
+```{R,echo=FALSE}
+page <- "https://www.transfermarkt.co.uk/premier-league/marktwerte/wettbewerb/GB1/pos//detailpos//altersklasse/alle/plus//galerie/0/page/"
+for (i in 1:4) {
+  url <- paste0(page,as.character(i))
+  scraped_page <- read_html(url)
+player_name=html_nodes(scraped_page,"#yw1 .spielprofil_tooltip") %>% 
+  html_text()%>%
+  as.character()
+TransferValue=html_nodes(scraped_page,"#yw1 .rechts.hauptlink span") %>% 
+  html_text()%>%
+  as.character()%>%
+  str_remove_all("\u00A0")
+Age=html_nodes(scraped_page,"#yw1 td:nth-child(4)") %>% 
+  html_text()%>%
+  as.numeric()
+Position=html_nodes(scraped_page,"#yw1 .inline-table tr+ tr td") %>% 
+  html_text()%>%
+  as.factor()
+TransferValue=TransferValue[TransferValue!=""]
+data_value=data.frame(player_name,TransferValue,Age,Position)
+if(i==1){
+  data_values=data_value
+}
+else data_values<- rbind(data_values, data_value)
+}
+head(data_values,10)
+```
+
+The unit of transfer values in the data is million pounds with some Financial symbols, since all the Top 100 players¡¯ transfer values are the same unit, I think it¡¯s better to clean those symbols and turn them into numbers. I also add a feature called rank indicate the rank of player among Top 100 by transfer value. Data samples of top10 player is shown below, the unit of transfer values is 10000 pounds:
+
+```{R,echo=FALSE}
+values=data_values$TransferValue%>%
+  str_extract_all("[0-9]")
+value=character(100)
+for (i in 1:100) {
+  value[i]=str_c(values[[i]],collapse = "")
+}
+value=as.numeric(value)
+data_values$TransferValue=value
+head(data_values,10)
+```
+
+Let's go explore the data. Plot the transfer values again rank, and different color indicate different positions or ages.
+
+```{r,echo=FALSE}
+data_values=data_values%>%
+  mutate(rank=rep(1:100))
+par(mfrow=c(2,2))
+ggplot(data_values,aes(rank,TransferValue,colour=Position))+geom_point()+ggtitle("Top 100 player in EPL")
+ggplot(data_values,aes(rank,TransferValue,colour=Age))+geom_point()+ggtitle("Top 100 player in EPL")
+```
+
+We can see that the distribution is not linear and transfer values for attacking players are seems higher than defensing players in average. And most players are under 28 and we can see that younger player are tend to have a higher transfer value. In fact, the average age of top 100 players is 25.79 which is lower than the average age of football player all over the league(27.08).
+
+To explore more on the impact of positions, give a plot of average transfer values for each position.
+
+```{r,echo=FALSE}
+ggplot(data_values, aes(x=Position, y= TransferValue, fill=Position)) +  geom_boxplot() +theme(axis.text.x = element_blank())+ggtitle("Transfer values boxplot of different Positions")
+```
+
+We can see that center forward has the highest average transfer value, the values of wingers (left winger and right winger) are also high, it seems that forward¡¯s transfer value is higher than middle field and back¡¯s values.
+
+Thus, we can mutate a new variable called ¡°general position¡± which include forward, middle field, back and goalkeeper by the basic knowledge of soccer.
+
+```{r,echo=FALSE}
+data100_forward=data_values%>%
+  filter(data_values$Position=="Right Winger"|data_values$Position=="Left Winger"|data_values$Position=="Centre-Forward")%>%
+  mutate("generalposition"="forward")%>%
+  select(generalposition,rank)
+data100_midfield=data_values%>%
+  filter(data_values$Position=="Attacking Midfield"|data_values$Position=="Central Midfield"|data_values$Position=="Left Midfield")%>%
+  mutate("generalposition"="midfield")%>%
+  select(generalposition,rank)
+data100_back=data_values%>%
+  filter(data_values$Position=="Centre-Back"|data_values$Position=="Left-Back"|data_values$Position=="Right-Back"|data_values$Position=="Defensive Midfield")%>%
+  mutate("generalposition"="back")%>%
+  select(generalposition,rank)
+data100_goalkeeper=data_values%>%
+  filter(data_values$Position=="Goalkeeper")%>%
+  mutate("generalposition"="goalkeeper")%>%
+  select(generalposition,rank)
+data1001=data_values%>%
+  left_join(data100_forward,by="rank")%>%
+  left_join(data100_midfield,by="rank")%>%
+  left_join(data100_back,by="rank")%>%
+  left_join(data100_goalkeeper,by="rank")%>%
+  mutate("generalposition"=paste(generalposition.x,generalposition.y,generalposition.x.x,generalposition.y.y))%>%
+  select(-generalposition.x,-generalposition.y,-generalposition.x.x,-generalposition.y.y)
+data1001$generalposition=data1001$generalposition%>%
+  str_remove_all("NA")%>%
+  str_remove_all(" ")
+ggplot(data1001, aes(x=generalposition, y= TransferValue, fill=generalposition)) +  geom_boxplot() +theme(axis.text.x = element_blank())+ggtitle("Transfer values boxplot of different generalPositions")
+head(data1001,10)
+```
+
+It¡¯s clear from the boxplot that forward has the highest average value, followed by goalkeeper, back and middle field.
+
+```{r,echo=FALSE}
+count(data1001,Position,sort=T)
+```
+
+We can see most of players in Top 100 values are in center(center back, center midfield and center forward). It shows that center area is still the most important part for football.
+
+To do deeper researches, more data is needed, and we need some data that can reflect player¡¯s performance in field. However, football(soccer) is a low scoring game that final match score does not provide a clear picture of performance. What¡¯s more, football players in different positions have different responsibility. You can¡¯t expect a goalkeeper to score a goal or a forward do a lot of defense. Those features of football indicate that basic data like goals and assists is not enough to evaluate player¡¯s performance and players in different positions needs different data to evaluate.
+
+At first, I want to use data from whoscored (https://www.whoscored.com/), which is one of the most popular football data website and is famous for it¡¯s machine rating system for every players and every matches. I thought it would be a great data to evaluate player¡¯s performance. 
+
+However, the website has a system called Incapsula that can reject scraping. This system can identify whether you are using selenium, phantomJS, etc. Each time you enter the page, a cookie will be generated for the user's test results, and then the request will carry the test cookie and return other cookies to gain access to the site. But even if the access is authorized, too many requests will trigger the Incapsula system.
+
+The data for each player stores in different pages that I need at least 100 request to get the data, however, only 5 or even less request will trigger this system. Thus I need find another website to get data.
+
+For forward, the most important job of them is to score a goal. However, sometimes the chance is created by your teammate, but all the data says is just 1 goal. So, I use the statistical measure called expected goal (xG), which is measurement of the quality of chance player received range from 0 to 1 each time, to evaluate forward¡¯s performance of shooting.
+
+The higher value of xG, the better the chance is; thus, we can also define expected assist (xA) which measure the quality of chances provided by player.
+
+For this case, researchers trained neural network prediction algorithms with large dataset (>100000 shots, over 10 parameters for each), I  scraping and cleaning this kind of data from understat(https://understat.com/) and the data was Json.
+
+```{r,echo=FALSE}
+ player_names <- "https://understat.com/league/EPL" %>%
+    read_html()%>%
+    html_nodes("script") %>%
+    as.character()%>%
+    str_subset("playersData") %>%
+    stri_unescape_unicode() %>%
+    rm_square(extract = TRUE, include.markers = TRUE) %>%
+    unlist()%>%
+    fromJSON()
+```
+
+Join the 2 data i get from different websites, the cleaned data samples are shown below:
+
+```{r,echo=FALSE}
+data1001$player_name=as.character(data_values$player_name)
+data100=data1001%>%
+  left_join(player_names,by="player_name",copy=FALSE)
+```
+
+Since we need do some regression, clean the data into numbers and save in a csv file called "data".
+
+```{r,echo=FALSE}
+data100=data100%>%
+  select(-position,-team_title)
+data100$games=as.numeric(data100$games)
+data100$time=as.numeric(data100$time)
+data100$goals=as.numeric(data100$goals)
+data100$xG=as.numeric(data100$xG)
+data100$assists=as.numeric(data100$assists)
+data100$xA=as.numeric(data100$xA)
+data100$shots=as.numeric(data100$shots)
+data100$key_passes=as.numeric(data100$key_passes)
+data100$npg=as.numeric(data100$npg)
+data100$npxG=as.numeric(data100$npxG)
+data100$xGChain=as.numeric(data100$xGChain)
+data100$xGBuildup=as.numeric(data100$xGBuildup)
+head(data100,10)
+write.csv(data100,"data.csv",row.names = TRUE)
+```
+
+Where npg means none-penalty goal and npxG means none-penalty expected goal, xGChain means total xG of every possession the player is involved in and xGBulidup means total xG of every possession the player is involved in without key passes or shots. xGChain and xGBulidup can reflect how helpful this player is for the team during attacking.
+
+Let¡¯s first analyze forward¡¯s data, the major job for them is attacking, so I choose data that related to attacking (goal, xG, assist, xA, shots, key passes, npg, npxG, xGChain, xGBulidup) and player¡¯s age to build a regression model for transfer values.
+
+```{r,echo=FALSE}
+data100_forward=data100%>%
+  filter(generalposition=="forward")%>%
+  select(-id,-Position,-generalposition,-games,-yellow_cards,-red_cards,-player_name,-rank)%>%
+  scale(center = T,scale = T)%>%
+  as.data.frame()
+model_forward=lm(TransferValue~. ,data=data100_forward)
+summary(model_forward)
+```
+
+The R-square is high which means our model explain the data well, but when checking those coefs, we can see that it's strange that npg and xG are negative while goals and npxG are positive.
+
+Since xG is the quality of chance received, maybe we should use the difference between xG and goals to evaluate the player¡¯s ability in attacking, and we should use per min data to show the player¡¯s efficiency.
+
+Let's change the data and fit the model again.
+
+```{r,echo=FALSE}
+data100_forward=data100%>%
+  filter(generalposition=="forward")%>%
+  select(-id,-Position,-generalposition,-games,-yellow_cards,-red_cards,-player_name,-rank)%>%
+  mutate("attack"=goals-xG)%>%
+  mutate("npattack"=npg-npxG)%>%
+  mutate("key_pass_per_min"=key_passes/time)%>%
+  mutate("shots_per_min"=shots/time)%>%
+  mutate("xGChain_per_min"=xGChain/time)%>%
+  mutate("xGBuildup_per_min"=xGBuildup/time)%>%
+  mutate("xA_per_min"=xA/time)%>%
+  select(attack,key_pass_per_min,shots_per_min,xGChain_per_min,xGBuildup_per_min,xA_per_min,TransferValue,Age)%>%
+  scale(center = T,scale = T)%>%
+  as.data.frame()
+model_forward2=lm(TransferValue~. ,data=data100_forward)
+summary(model_forward2)
+```
+
+Although the R square decrease a lot, the coefs of the model is more reasonable. Attack is xG minus goals, thus higher Attack means the player scored more goals than expected and that shows the ability of the player. By viewing the P-value we can conclude that the most important data for a forward's transfer value are attact and age. That fits our instinct.
+
+```{r,echo=FALSE}
+data100_forward=data100%>%
+  filter(Position=="Centre-Forward")%>%
+  select(-id,-Position,-generalposition,-games,-yellow_cards,-red_cards,-player_name,-rank)%>%
+  mutate("attack"=goals-xG)%>%
+  mutate("npattack"=npg-npxG)%>%
+  mutate("key_pass_per_min"=key_passes/time)%>%
+  mutate("shots_per_min"=shots/time)%>%
+  mutate("xGChain_per_min"=xGChain/time)%>%
+  mutate("xGBuildup_per_min"=xGBuildup/time)%>%
+  mutate("xA_per_min"=xA/time)
+ggplot(data100_forward,aes(x=TransferValue,y=attack,colour=Age))+geom_point()
+```
+
+We can see from the plot that player with high transfer values tend to have higher attack. What is interesting is that elder players are tend to have high attack but low transfer value.
+
+In fact, the average attack of Top100 forward player is 0.6375095 which is positive. That means "expensive" forward have the ablity to score more goal than expected.
+
+Let's analyze middle field:
+
+```{r,echo=FALSE}
+data100_midfield=data100%>%
+  filter(generalposition=="midfield")%>%
+  select(-id,-Position,-generalposition,-games,-yellow_cards,-red_cards,-player_name,-rank)%>%
+  mutate("attack"=goals-xG)%>%
+  mutate("npattack"=npg-npxG)%>%
+  mutate("key_pass_per_min"=key_passes/time)%>%
+  mutate("shots_per_min"=shots/time)%>%
+  mutate("xGChain_per_min"=xGChain/time)%>%
+  mutate("xGBuildup_per_min"=xGBuildup/time)%>%
+  mutate("xA_per_min"=xA/time)%>%
+  select(attack,key_pass_per_min,shots_per_min,xGChain_per_min,xGBuildup_per_min,xA_per_min,TransferValue,Age)%>%
+  scale(center = T,scale = T)%>%
+  as.data.frame()
+model_midfield=lm(TransferValue~. ,data=data100_midfield)
+summary(model_midfield)
+```
+
+We can see the coefs are changed a lot, the importanance of xA and xGBulidup stand out as the key factor. it's reasonable because midfields need do more with passes and assist, sometimes defense.
+
+
+```{r,echo=FALSE}
+data100_midfield=data100%>%
+  filter(generalposition=="midfield")%>%
+  select(-id,-Position,-generalposition,-games,-yellow_cards,-red_cards,-player_name,-rank)%>%
+  mutate("attack"=goals-xG)%>%
+  mutate("npattack"=npg-npxG)%>%
+  mutate("key_pass_per_min"=key_passes/time)%>%
+  mutate("shots_per_min"=shots/time)%>%
+  mutate("xGChain_per_min"=xGChain/time)%>%
+  mutate("xGBuildup_per_min"=xGBuildup/time)%>%
+  mutate("xA_per_min"=xA/time)
+ggplot(data100_midfield,aes(x=TransferValue,y=xA,colour=Age))+geom_point()
+```
+
+We can see from the plot that player with high transfer values tend to have higher xA, which fits the results of regression.
+
+In conclusion, we can see that xG and xA can reflect the performance of a player better compared with basic data like goals and assists. However, age is also a very important part when discuss a player¡¯s transfer values.
+
+Obviously, there are many other variables that may affect player¡¯s transfer values like nationality, club, height, commercial value and so on. But I believe the usage of expected data is a big step for football analyze.
+
+The url of github is: https://github.com/redLeo-D/project_stat597 
+
